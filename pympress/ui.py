@@ -1354,7 +1354,7 @@ class UI(builder.Builder):
 
         if widget is self.c_da or widget is self.p_da_cur or widget is self.scribbler.scribble_p_da:
             # do not use the zoom matrix for the pointer, it is relative to the screen not the slide
-            self.laser.render_pointer(cairo_context, ww, wh)
+            self.laser.render_pointer(cairo_context, widget, ww, wh)
 
 
     def clear_zoom_cache(self):
