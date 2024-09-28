@@ -56,10 +56,14 @@ class Pointer(object):
         config (:class:`~pympress.config.Config`): A config object containing preferences
         builder (:class:`~pympress.builder.Builder`): A builder from which to load widgets
     """
-    #: :class:`~GdkPixbuf.Pixbuf` to read XML descriptions of GUIs and load them.
-    pointer = GdkPixbuf.Pixbuf()
+    #: A `dict` of the :class:`~GdkPixbuf.Pixbuf` to read XML descriptions of GUIs and load them.
+    pointers = {}
     #: `(float, float)` of position relative to slide, where the pointer should appear
     pointer_pos = (.5, .5)
+    #: A `float` of drawing size of the pointer in ratio to the screen height
+    size = .035
+    #: A `str` name of the pointer to load
+    color = None
     #: `bool` indicating whether we should show the pointer
     show_pointer = False
     #: :class:`~pympress.pointer.PointerMode` indicating the pointer mode
@@ -92,7 +96,8 @@ class Pointer(object):
         self.set_action_state = builder.get_callback_handler('app.set_action_state')
 
         default_mode = config.get('presenter', 'pointer_mode')
-        default_color = config.get('presenter', 'pointer')
+        self.color = config.get('presenter', 'pointer')
+        self.size = config.getfloat('presenter', 'pointer_size')
 
         try:
             default_mode = PointerMode[default_mode.upper()]
@@ -100,28 +105,35 @@ class Pointer(object):
             default_mode = PointerMode.MANUAL
 
         self.activate_pointermode(default_mode)
-        self.load_pointer(default_color)
 
         self.action_map = builder.setup_actions({
-            'pointer-color': dict(activate=self.change_pointercolor, state=default_color, parameter_type=str),
+            'pointer-color': dict(activate=self.change_pointercolor, state=self.color, parameter_type=str),
             'pointer-mode': dict(activate=self.change_pointermode, state=default_mode.name.lower(), parameter_type=str),
         })
 
 
-    def load_pointer(self, name):
-        """ Perform the change of pointer using its color name.
+    def load_pointer(self, name, base_size):
+        """ Perform the change of pointer using its size and widget name where to draw.
 
         Args:
-            name (`str`): Name of the pointer to load
-        """
-        if name not in ['red', 'green', 'blue']:
-            raise ValueError('Wrong color name')
-        path = util.get_icon_path('pointer_' + name + '.png')
-        try:
-            self.pointer = GdkPixbuf.Pixbuf.new_from_file(path)
-        except Exception:
-            logger.exception(_('Failed loading pixbuf for pointer "{}" from: {}'.format(name, path)))
+            name (`str`): The widget name which associated with the loaded pointer for caching
+            base_size (`int`): The basis of pointer size in pixels
 
+        Returns:
+            :class:`~GdkPixbuf.Pixbuf`: A pointer from the source image
+        """
+        if self.color not in ['red', 'green', 'blue']:
+            raise ValueError('Wrong color name')
+        size = round(base_size * self.size)  # in pixels
+        pointer = self.pointers.get(name)
+        if pointer is None or pointer.get_height() != size:
+            path = util.get_icon_path('pointer_' + self.color + '.png')
+            try:
+                pointer = GdkPixbuf.Pixbuf.new_from_file_at_size(path, size, size)
+            except Exception:
+                logger.exception(_('Failed loading pixbuf for pointer "{}" from: {}'.format(name, path)))
+            self.pointers[name] = pointer
+        return pointer
 
     def change_pointercolor(self, action, target):
         """ Callback for a radio item selection as pointer mode (continuous, manual, none).
@@ -130,9 +142,9 @@ class Pointer(object):
             action (:class:`~Gio.Action`): The action activatd
             target (:class:`~GLib.Variant`): The selected mode
         """
-        color = target.get_string()
-        self.load_pointer(color)
-        self.config.set('presenter', 'pointer', color)
+        self.color = target.get_string()
+        self.pointers.clear()
+        self.config.set('presenter', 'pointer', self.color)
         action.change_state(target)
 
 
@@ -193,18 +205,20 @@ class Pointer(object):
         action.change_state(GLib.Variant.new_string(mode.name.lower()))
 
 
-    def render_pointer(self, cairo_context, ww, wh):
+    def render_pointer(self, cairo_context, widget, ww, wh):
         """ Draw the laser pointer on screen.
 
         Args:
             cairo_context (:class:`~cairo.Context`): The canvas on which to render the pointer
+            widget (:class:`~Gtk.DrawingArea`): The widget to update
             ww (`int`): The widget width
             wh (`int`): The widget height
         """
         if self.show_pointer:
-            x = ww * self.pointer_pos[0] - self.pointer.get_width() / 2
-            y = wh * self.pointer_pos[1] - self.pointer.get_height() / 2
-            Gdk.cairo_set_source_pixbuf(cairo_context, self.pointer, x, y)
+            pointer = self.load_pointer(widget.get_name(), wh)
+            x = ww * self.pointer_pos[0] - pointer.get_width() / 2
+            y = wh * self.pointer_pos[1] - pointer.get_height() / 2
+            Gdk.cairo_set_source_pixbuf(cairo_context, pointer, x, y)
             cairo_context.paint()
 
 
