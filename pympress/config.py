@@ -188,6 +188,7 @@ class Config(configparser.ConfigParser, object):  # python 2 fix
         if self.get('presenter', 'pointer') == 'pointer_none':
             self.set('presenter', 'pointer', 'red')
             self.set('presenter', 'pointer_mode', 'disabled')
+            self.set('presenter', 'pointer_size', '0.035')
 
         if self.has_section('scribble') and self.has_option('scribble', 'color'):
             self.set('scribble', 'color_9', self.get('scribble', 'color'))
