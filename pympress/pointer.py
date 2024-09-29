@@ -303,3 +303,233 @@ class Pointer(object):
 
         else:
             return False
+
+
+class PointerEditor(builder.Builder):
+    """ UI that allows to configure laser pointer
+
+    Args:
+        config (:class:`~pympress.config.Config`): A config object containing preferences
+        builder (:class:`~pympress.builder.Builder`): A builder from which to load widgets
+    """
+    #: Whether we are displaying the interface to configure pointer on screen
+    pointer_editor_mode = False
+    #: :class:`~Gtk.HBox` that replaces normal panes when pointer editing is on
+    pointer_editor_overlay = None
+    #: A :class:`~Gtk.OffscreenWindow` where we render the pointer editing interface when it's not shown
+    pointer_editor_off_render = None
+
+    def __init__(self, config, builder):
+        super(PointerEditor, self).__init__()
+
+        self.load_ui('pointer_editor')
+        builder.load_widgets(self)
+        self.get_application().add_window(self.pointer_editor_off_render)
+
+        self.connect_signals(self)
+        self.config = config
+
+        self.load_preset(self.pen_action, int(active_pen) if active_pen.isnumeric() else 0)
+        self.set_mode(None, GLib.Variant.new_string(config.get('highlight', 'mode')))
+
+
+    def try_cancel(self):
+        """ Cancel pointer editing, if it is enabled.
+
+        Returns:
+            `bool`: `True` if pointer editing got cancelled, `False` if it was already disabled.
+        """
+        if not self.pointer_editor_mode:
+            return False
+        
+        self.disable_editing()
+        return True
+
+
+    def key_event(self, widget, event):
+        """ Handle key events to activate the eraser while the shortcut is held
+
+        Args:
+            widget (:class:`~Gtk.Widget`):  the widget which has received the event.
+            event (:class:`~Gdk.Event`):  the GTK event.
+
+        Returns:
+            `bool`: whether the event was consumed
+        """
+        if not self.pointer_editor_mode:
+            return False
+        elif event.type != Gdk.EventType.KEY_PRESS and event.type != Gdk.EventType.KEY_RELEASE:
+            return False
+        elif not (*event.get_keyval()[1:], event.get_state()) in self.toggle_erase_shortcuts:
+            return False
+
+        if event.type == Gdk.EventType.KEY_PRESS and self.active_preset and self.toggle_erase_source is None:
+            self.previous_preset = self.active_preset
+            self.toggle_erase_source = 'shortcut'
+            self.load_preset(target=0)
+        elif event.type == Gdk.EventType.KEY_RELEASE and self.toggle_erase_source == 'shortcut' \
+                and self.previous_preset and not self.active_preset:
+            self.load_preset(target=self.previous_preset)
+            self.previous_preset = 0
+            self.toggle_erase_source = None
+        else:
+            return False
+        return True
+
+
+    def toggle_pointer(self, widget, event):
+        """ Start/stop pointer.
+
+        Args:
+            widget (:class:`~Gtk.Widget`):  the widget which has received the event.
+            event (:class:`~Gdk.Event`):  the GTK event.
+
+        Returns:
+            `bool`: whether the event was consumed
+        """
+        if not self.pointer_editor_mode:
+            return False
+
+        if event.get_event_type() == Gdk.EventType.BUTTON_PRESS:
+            eraser_button = event.get_source_device().get_source() == Gdk.InputSource.ERASER
+            eraser_modifier = any(mod & event.get_state() == mod for mod in self.toggle_erase_modifiers)
+            if (eraser_button or eraser_modifier) and self.active_preset and self.toggle_erase_source is None:
+                self.previous_preset = self.active_preset
+                self.toggle_erase_source = 'modifier'
+                self.load_preset(target=0)
+
+            self.scribble_list.append((self.scribble_color, self.scribble_width, [], []))
+            self.scribble_drawing = True
+
+            return self.track_scribble(widget, event)
+        elif event.get_event_type() == Gdk.EventType.BUTTON_RELEASE:
+            self.scribble_drawing = False
+            self.prerender()
+
+            if not self.active_preset and self.previous_preset and self.toggle_erase_source == 'modifier':
+                self.load_preset(target=self.previous_preset)
+                self.previous_preset = 0
+                self.toggle_erase_source = None
+
+            return True
+
+        return False
+
+
+    def update_size(self, widget, event, value):
+        """ Callback for the size chooser slider, to set scribbling size.
+
+        Args:
+            widget (:class:`~Gtk.Scale`): The slider control used to select the scribble size
+            event (:class:`~Gdk.Event`):  the GTK event triggering this update.
+            value (`int`): the size of the scribbles to be drawn
+        """
+        self.scribble_size = max(1, min(100, 10 ** value if value < 1 else 10 + (value - 1) * 90))
+        self.update_active_color_size()
+
+
+    def switch_editing(self, gaction, target=None):
+        """ Starts the mode where one can read on top of the screen.
+
+        Args:
+
+        Returns:
+            `bool`: whether the event was consumed
+        """
+        if target is not None and target == self.pointer_editor_mode:
+            return False
+
+        # Perform the state toggle
+        if self.pointer_editor_mode:
+            return self.disable_editing()
+        else:
+            return self.enable_editing()
+
+
+    def enable_editing(self):
+        """ Enable the pointer editing mode.
+
+        Returns:
+            `bool`: whether it was possible to enable (thus if it was not enabled already)
+        """
+        if self.pointer_editor_mode:
+            return False
+
+        self.pointer_editor_off_render.remove(self.pointer_editor_overlay)
+        self.load_layout('highlight')
+
+        self.p_central.queue_draw()
+        self.pointer_editor_overlay.queue_draw()
+
+        # Get frequent events for smooth drawing
+        self.p_central.get_window().set_event_compression(False)
+
+        self.pointer_editor_mode = True
+        self.get_application().lookup_action('highlight').change_state(GLib.Variant.new_boolean(self.pointer_editor_mode))
+        self.pen_action.set_enabled(self.pointer_editor_mode)
+
+        self.p_central.queue_draw()
+        extras.Cursor.set_cursor(self.scribble_p_da, 'invisible')
+        return True
+
+
+    def disable_editing(self):
+        """ Disable the pointer editing mode.
+
+        Returns:
+            `bool`: whether it was possible to disable (thus if it was not disabled already)
+        """
+        if not self.pointer_editor_mode:
+            return False
+
+        self.pointer_editor_mode = False
+
+        extras.Cursor.set_cursor(self.scribble_p_da, 'default')
+        self.load_layout(None)
+        self.pointer_editor_off_render.add(self.pointer_editor_overlay)
+        window = self.p_central.get_window()
+        if window:
+            window.set_event_compression(True)
+
+        self.get_application().lookup_action('highlight').change_state(GLib.Variant.new_boolean(self.pointer_editor_mode))
+        self.pen_action.set_enabled(self.pointer_editor_mode)
+
+        self.p_central.queue_draw()
+        extras.Cursor.set_cursor(self.p_central)
+        self.mouse_pos = None
+
+        return True
+
+
+    def load_preset(self, gaction=None, target=None):
+        """ Loads the preset color of a given number or designed by a given widget, as an event handler.
+
+        Args:
+            gaction (:class:`~Gio.Action`): the action triggering the call
+            target (:class:`~GLib.Variant`): the new preset to load, as a string wrapped in a GLib.Variant
+
+        Returns:
+            `bool`: whether the preset was loaded
+        """
+        if isinstance(target, int):
+            self.active_preset = target
+        else:
+            self.active_preset = int(target.get_string()) if target.get_string() != 'eraser' else 0
+
+        target = str(self.active_preset) if self.active_preset else 'eraser'
+
+        self.config.set('highlight', 'active_pen', target)
+        self.pen_action.change_state(GLib.Variant.new_string(target))
+        self.scribble_color, self.scribble_size = self.color_size[self.active_preset]
+
+        # Presenter-side setup
+        self.scribble_color_selector.set_rgba(self.scribble_color)
+        self.scribble_size_selector.set_value(math.log10(self.scribble_size) if self.scribble_size < 10
+                                               else 1 + (self.scribble_size - 10) / 90)
+        self.scribble_color_selector.set_sensitive(target != 'eraser')
+
+        # Re-draw the eraser
+        self.scribble_p_da.queue_draw()
+        self.c_da.queue_draw()
+
+        return True
