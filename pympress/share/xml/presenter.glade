@@ -1106,7 +1106,7 @@
               </packing>
             </child>
             <child>
-              <object class="GtkButton" id="highlight_button">
+              <object class="GtkToggleButton" id="highlight_button">
                 <property name="label" translatable="yes">Highlight</property>
                 <property name="visible">True</property>
                 <property name="can-focus">False</property>
@@ -1125,7 +1125,7 @@
               </packing>
             </child>
             <child>
-              <object class="GtkButton" id="laser_button">
+              <object class="GtkToggleButton" id="laser_button">
                 <property name="label" translatable="yes">Pointer</property>
                 <property name="visible">True</property>
                 <property name="can-focus">False</property>
