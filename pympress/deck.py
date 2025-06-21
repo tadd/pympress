@@ -151,7 +151,8 @@ class Overview(builder.Builder):
 
         # Set drawing areas
         for num, da in enumerate(self.deck_da_list[1:], 1):
-            self.deck_grid.attach(da.get_parent(), 1, num, 1, 1)
+            if da.get_parent() is not None:
+                self.deck_grid.attach(da.get_parent(), 1, num, 1, 1)
 
         for num in range(len(self.deck_da_list), len(pages)):
             da = Gtk.DrawingArea()
@@ -173,7 +174,8 @@ class Overview(builder.Builder):
 
         ratio = self.c_da.get_allocated_width() / self.c_da.get_allocated_height()
         for page, da in zip(pages, self.deck_da_list):
-            da.get_parent().set(.5, .5, ratio, False)
+            if da.get_parent() is not None:
+                da.get_parent().set(.5, .5, ratio, False)
             da.set_name('deck{}'.format(page))
 
 

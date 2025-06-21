@@ -822,8 +822,9 @@ class Document(object):
             new_entry = {'title': title}
             child = index_iter.get_child()
             if child:
-                new_entry['children'] = self.get_structure(child)
-                if page is None:
+                c = self.get_structure(child)
+                if len(c) > 0 and page is None:
+                    new_entry['children'] = c
                     page = min(new_entry['children'])
 
             # there should not be synonymous sections, correct the page here to a better guess
